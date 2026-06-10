@@ -1,0 +1,29 @@
+{
+  "lib/erc-8004-contracts": {
+    "rev": "0463311492b3a7fc5fdb6990231cce721ff6cf97"
+  },
+  "lib/forge-std": {
+    "tag": {
+      "name": "v1.16.1",
+      "rev": "620536fa5277db4e3fd46772d5cbc1ea0696fb43"
+    }
+  },
+  "lib/openzeppelin-contracts": {
+    "tag": {
+      "name": "v5.6.1",
+      "rev": "5fd1781b1454fd1ef8e722282f86f9293cacf256"
+    }
+  },
+  "lib/openzeppelin-contracts-upgradeable": {
+    "tag": {
+      "name": "v5.6.1",
+      "rev": "7bf4727aacdbfaa0f36cbd664654d0c9e1dc52bf"
+    }
+  },
+  "lib/testnet-Contracts": {
+    "tag": {
+      "name": "v3.1.2",
+      "rev": "597405724dcfce9b3b62d7fffd53fe0a44347b7a"
+    }
+  }
+}

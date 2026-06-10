@@ -1,0 +1,69 @@
+{
+  "name": "@evvm/testnet-contracts",
+  "version": "3.1.2",
+  "type": "module",
+  "description": "EVVM Testnet Contracts - Smart contracts and tools for scalable, modular, and cross-chain EVM virtualization",
+  "files": [
+    "contracts/**/*.sol",
+    "interfaces/**/*.sol",
+    "library/**/*.sol",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "evvm",
+    "ethereum",
+    "virtual-machine",
+    "solidity",
+    "smart-contracts",
+    "cross-chain",
+    "testnet",
+    "evm",
+    "blockchain",
+    "defi"
+  ],
+  "author": "EVVM Organization",
+  "license": "EVVM-NONCOMMERCIAL-1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EVVM-org/Testnet-Contracts.git"
+  },
+  "homepage": "https://github.com/EVVM-org/Testnet-Contracts#readme",
+  "bugs": {
+    "url": "https://github.com/EVVM-org/Testnet-Contracts/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "publish-package": "bun run copy-files && bun publish && bun run clean",
+    "prepare-publish": "bun run copy-files && bun run pack",
+    "build": "bun run copy-files",
+    "copy-files": "cp -r src/contracts . && cp -r src/interfaces . && cp -r src/library .",
+    "clean": "rm -rf contracts interfaces library",
+    "evvm": "bun run cli/index.ts",
+    "buildCli": "bun build cli/index.ts --compile --outfile evvm",
+    "build-all": "bun run build-linux && bun run build-windows && bun run build-macos",
+    "build-linux": "bun build cli/index.ts --compile --outfile .executables/evvm-linux-x64 && bun build cli/index.ts --compile --outfile .executables/evvm-linux-arm64 && bun build cli/index.ts --compile --outfile .executables/evvm-linux-x64-musl && bun build cli/index.ts --compile --outfile .executables/evvm-linux-arm64-musl",
+    "build-windows": "bun build cli/index.ts --compile --outfile .executables/evvm-windows-x64.exe",
+    "build-macos": "bun build cli/index.ts --compile --outfile .executables/evvm-darwin-x64 && bun build cli/index.ts --compile --outfile .executables/evvm-darwin-arm64"
+  },
+  "peerDependencies": {
+    "@openzeppelin/contracts": "^4.9.6"
+  },
+  "dependencies": {
+    "@hyperlane-xyz/core": "^3.16.0",
+    "chalk": "^5.6.2",
+    "cli-loading-animation": "^1.0.6",
+    "dotenv": "^16.6.1",
+    "execa": "^8.0.1",
+    "prompts": "^2.4.2",
+    "viem": "^2.47.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.37",
+    "@types/prompts": "^2.4.9",
+    "forge-std": "^1.1.2",
+    "typescript": "^5.9.3"
+  }
+}
