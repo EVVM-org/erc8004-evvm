@@ -6,34 +6,94 @@ import {
 } from "@evvm/testnet-contracts/library/utils/governance/ProposalStructs.sol";
 
 import {
+    SignatureRecover
+} from "@evvm/testnet-contracts/library/primitives/SignatureRecover.sol";
+
+import {
+    AdvancedStrings
+} from "@evvm/testnet-contracts/library/utils/AdvancedStrings.sol";
+
+import {
     IdentityRegistryUpgradeable as IdentityRegistry
 } from "erc8004/contracts/IdentityRegistryUpgradeable.sol";
 
+/// @title UserValidatorPreRegistrated
+/// @notice EVVM user validator using pre-registration and ERC-8004 onchain metadata with signature authorization
+/// @dev This contract implements a multi-step validation strategy:
+///      1. User must pre-register an agentId (self-service, requires ownership/wallet verification)
+///      2. User must currently be the owner or verified agentWallet of that agentId
+///      3. The agent must have metadata key "evvmAuthSignature" in the ERC-8004 registry
+///      4. That metadata must be a valid 65-byte ECDSA signature
+///      5. The signature must recover to the configured evvmAuthorizer address
+///
+///      The signature proves: "This agentId is authorized for this exact whitelist contract,
+///      on this exact chain, using this exact ERC-8004 Identity Registry."
+///
+///      Signature digest construction (matches sign_evvm_authorization.py and sign-evvm-authorization.ts):
+///      keccak256(abi.encodePacked("EVVM_AGENT_AUTH", block.chainid, address(this), address(identityRegistry), agentId))
+///
+///      The digest is converted to a 66-character hex string (with "0x" prefix) and signed using
+///      Ethereum Signed Message format: keccak256("\x19Ethereum Signed Message:\n66" || hexString)
 contract UserValidatorPreRegistrated {
+    /// @notice The ERC-8004 Identity Registry used for agent verification and metadata retrieval
     IdentityRegistry immutable identityRegistry;
+
+    /// @notice Administrative address for governance proposals
     ProposalStructs.AddressTypeProposal public admin;
+
+    /// @notice Address whose signatures authorize agents for this EVVM whitelist
     address public immutable evvmAuthorizer;
 
+    /// @notice Metadata key expected in the ERC-8004 Identity Registry for authorization signatures
     string public constant AUTH_METADATA_KEY = "evvmAuthSignature";
 
+    /// @notice Structure holding pre-registration data for a user
+    /// @param active Whether the pre-registration is currently active
+    /// @param agentId The ERC-8004 agent identifier that was pre-registered
     struct PreRegistration {
         bool active;
         uint256 agentId;
     }
 
+    /// @notice Mapping from user address to their pre-registered agent data
     mapping(address => PreRegistration) public preRegisteredAgent;
 
+    /// @notice Emitted when a user successfully pre-registers an agent
+    /// @param user The address that pre-registered the agent
+    /// @param agentId The ERC-8004 agent identifier that was pre-registered
     event AgentPreRegistered(address indexed user, uint256 indexed agentId);
-    event AgentPreRegistrationRemoved(address indexed user, uint256 indexed agentId);
 
+    /// @notice Emitted when a user removes their pre-registration
+    /// @param user The address that removed their pre-registration
+    /// @param agentId The ERC-8004 agent identifier that was removed
+    event AgentPreRegistrationRemoved(
+        address indexed user,
+        uint256 indexed agentId
+    );
+
+    /// @notice Thrown when a caller is not the current owner or verified agentWallet of an agent
     error NotCurrentAgentOwnerOrWallet();
 
-    constructor(address _admin, address _identityRegistry, address _evvmAuthorizer) {
+    /// @notice Creates a new UserValidatorPreRegistrated instance
+    /// @param _admin The initial administrator address for governance
+    /// @param _identityRegistry Address of the ERC-8004 Identity Registry contract
+    /// @param _evvmAuthorizer Address whose signatures authorize agents for this whitelist
+    constructor(
+        address _admin,
+        address _identityRegistry,
+        address _evvmAuthorizer
+    ) {
         admin.current = _admin;
         identityRegistry = IdentityRegistry(_identityRegistry);
         evvmAuthorizer = _evvmAuthorizer;
     }
 
+    /// @notice Self-service pre-registration of an ERC-8004 agentId for msg.sender
+    /// @dev Caller must be either the ownerOf(agentId) or getAgentWallet(agentId) in the registry.
+    ///      This is needed because ERC-721 balanceOf tells us "this address owns N agents" but not which agentIds.
+    ///      Pre-registration gives this validator a direct address -> agentId mapping.
+    /// @param agentId The ERC-8004 agent identifier to pre-register
+    /// @custom:throws NotCurrentAgentOwnerOrWallet If caller is not owner or verified agentWallet
     function preRegisterAgent(uint256 agentId) external {
         if (!_isCurrentAgentOwnerOrWallet(msg.sender, agentId)) {
             revert NotCurrentAgentOwnerOrWallet();
@@ -47,6 +107,8 @@ contract UserValidatorPreRegistrated {
         emit AgentPreRegistered(msg.sender, agentId);
     }
 
+    /// @notice Remove the caller's pre-registration
+    /// @dev Deletes the pre-registration entry for msg.sender and emits AgentPreRegistrationRemoved
     function removePreRegistration() external {
         PreRegistration memory current = preRegisteredAgent[msg.sender];
 
@@ -55,57 +117,72 @@ contract UserValidatorPreRegistrated {
         emit AgentPreRegistrationRemoved(msg.sender, current.agentId);
     }
 
+    /// @notice Checks if a user is allowed to execute through the EVVM
+    /// @dev Performs the complete 5-step validation:
+    ///      1. User has an active pre-registration
+    ///      2. User is still the current owner or verified agentWallet of the agentId
+    ///      3. The agent has metadata key "evvmAuthSignature" in the registry
+    ///      4. The metadata is a valid 65-byte ECDSA signature
+    ///      5. The signature recovers to the configured evvmAuthorizer
+    /// @param user The address to check authorization for
+    /// @return allowed True if all validation steps pass, false otherwise
     function canExecute(address user) external view returns (bool allowed) {
-        if (user == address(0)) {
-            return false;
-        }
+        if (user == address(0)) return false;
 
         PreRegistration memory reg = preRegisteredAgent[user];
 
-        if (!reg.active) {
-            return false;
-        }
+        if (!reg.active) return false;
 
-        if (!_isCurrentAgentOwnerOrWallet(user, reg.agentId)) {
-            return false;
-        }
+        if (!_isCurrentAgentOwnerOrWallet(user, reg.agentId)) return false;
 
         bytes memory signature;
 
-        try identityRegistry.getMetadata(reg.agentId, AUTH_METADATA_KEY) returns (bytes memory result) {
+        try
+            identityRegistry.getMetadata(reg.agentId, AUTH_METADATA_KEY)
+        returns (bytes memory result) {
             signature = result;
         } catch {
             return false;
         }
+        if (signature.length != 65) return false;
 
-        if (signature.length != 65) {
-            return false;
-        }
-
-        bytes32 digest = authorizationDigest(reg.agentId);
-        bytes32 ethSignedDigest = toEthSignedMessageHash(digest);
-
-        return recoverSigner(ethSignedDigest, signature) == evvmAuthorizer;
+        return
+            SignatureRecover.recoverSigner(
+                AdvancedStrings.bytes32ToString(
+                    keccak256(
+                        abi.encodePacked(
+                            "EVVM_AGENT_AUTH",
+                            block.chainid,
+                            address(this),
+                            address(identityRegistry),
+                            reg.agentId
+                        )
+                    )
+                ),
+                signature
+            ) == evvmAuthorizer;
     }
 
-    function authorizationDigest(uint256 agentId) public view returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(
-                "EVVM_AGENT_AUTH",
-                block.chainid,
-                address(this),
-                address(identityRegistry),
-                agentId
-            )
-        );
-    }
-
-    function registeredAgentIdOf(address user) external view returns (bool active, uint256 agentId) {
+    /// @notice Helper for demos and UIs to retrieve the registered agentId for a user
+    /// @param user The address to query
+    /// @return active Whether the user has an active pre-registration
+    /// @return agentId The ERC-8004 agent identifier (meaningful only if active is true)
+    function registeredAgentIdOf(
+        address user
+    ) external view returns (bool active, uint256 agentId) {
         PreRegistration memory reg = preRegisteredAgent[user];
         return (reg.active, reg.agentId);
     }
 
-    function _isCurrentAgentOwnerOrWallet(address account, uint256 agentId) internal view returns (bool) {
+    /// @notice Checks if an account is currently the agent owner or verified agent wallet
+    /// @dev Queries the ERC-8004 Identity Registry for ownerOf() and getAgentWallet()
+    /// @param account The address to check
+    /// @param agentId The ERC-8004 agent identifier to verify against
+    /// @return True if account is owner or verified agentWallet of agentId, false otherwise
+    function _isCurrentAgentOwnerOrWallet(
+        address account,
+        uint256 agentId
+    ) internal view returns (bool) {
         if (account == address(0)) {
             return false;
         }
@@ -117,7 +194,6 @@ contract UserValidatorPreRegistrated {
         } catch {
             return false;
         }
-
         if (account == owner) {
             return true;
         }
@@ -129,35 +205,6 @@ contract UserValidatorPreRegistrated {
         } catch {
             return false;
         }
-
         return agentWallet != address(0) && account == agentWallet;
-    }
-
-    function toEthSignedMessageHash(bytes32 digest) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", digest)
-        );
-    }
-
-    function recoverSigner(bytes32 ethSignedDigest, bytes memory signature) internal pure returns (address) {
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-
-        assembly {
-            r := mload(add(signature, 0x20))
-            s := mload(add(signature, 0x40))
-            v := byte(0, mload(add(signature, 0x60)))
-        }
-
-        if (v < 27) {
-            v += 27;
-        }
-
-        if (v != 27 && v != 28) {
-            return address(0);
-        }
-
-        return ecrecover(ethSignedDigest, v, r, s);
     }
 }
