@@ -1,5 +1,12 @@
 # EVVM + ERC-8004 Official Registry Whitelist Examples
 
+> **Status: Proof of Concept**
+>
+> This repository is a proof of concept (PoC). It is
+> not production-ready. Automated tests are not yet implemented, and several
+> processes (signature verification, pre-registration flows, deployment scripts)
+> are subject to refinement. Use at your own risk.
+
 EVVM user validators using the official ERC-8004 Identity Registry.
 
 These examples do **not** deploy a custom ERC-8004 registry.
@@ -14,10 +21,13 @@ They use the official Ethereum Mainnet ERC-8004 Identity Registry by default:
 erc8004-evvm/
 ├── contracts/                    # Foundry project
 │   ├── src/
-│   │   ├── UserValidator.sol                    # EVVM-integrated basic validator
-│   │   ├── UserValidatorPreRegistrated.sol      # EVVM-integrated pre-registration validator
+│   │   ├── UserValidatorBasic.sol               # Type 1: Manual whitelist (UserValidatorManual)
+│   │   ├── UserValidator.sol                    # Type 2: ERC-8004 balanceOf check
+│   │   ├── UserValidatorPreRegistrated.sol      # Type 3: Pre-registration + signature
 │   │   ├── WhitelistEVVM_BasicERC8004.sol       # Standalone reference (no external deps)
 │   │   └── WhitelistEVVM_PreRegisteredERC8004.sol
+│   ├── script/
+│   │   └── DeployValidator.s.sol                # Deployment script (flag-based)
 │   ├── lib/                      # Git submodules (ERC-8004, OpenZeppelin, etc.)
 │   └── foundry.toml
 └── scripts/
@@ -218,6 +228,17 @@ Ethereum, Optimism, BSC, Gnosis, Polygon, XLayer, Abstract, Base, Taiko, Arbitru
 BSC Testnet, Hedera Testnet, Celo Alfajores, Soneium Minato, Sepolia, Optimism Sepolia, Polygon Amoy, Base Sepolia, Arbitrum Sepolia, Avalanche Fuji, Linea Sepolia, Mantle Sepolia, Metis Sepolia, Scroll Sepolia
 
 For unsupported chains, set `IDENTITY_REGISTRY` env var to override.
+
+## Work in Progress
+
+The following areas are planned but not yet implemented:
+
+- **Automated tests**: Foundry tests for all validator contracts
+- **Signature verification tests**: Cross-validation between Solidity and signing scripts
+- **Pre-registration flow tests**: End-to-end testing of the full authorization flow
+- **Deployment tests**: Script testing on local/testnet environments
+- **Production hardening**: OpenZeppelin ECDSA, admin controls, revocation strategy, expiry/deadline
+- **Additional chain support**: Expand auto-detection for more networks
 
 ## Important
 
