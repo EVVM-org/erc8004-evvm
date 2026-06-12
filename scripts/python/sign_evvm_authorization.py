@@ -29,7 +29,8 @@ The signed digest matches the Solidity implementation::
             block.chainid,
             address(whitelist),
             address(identityRegistry),
-            agentId
+            agentId,
+            block.timestamp
         )
     )
 
@@ -37,6 +38,10 @@ The resulting 32-byte digest is converted to a 66-character hex string
 (with ``0x`` prefix) and signed using the Ethereum Signed Message format::
 
     keccak256("\\x19Ethereum Signed Message:\\n66" || hexString)
+
+IMPORTANT: The timestamp in the signature MUST match the block.timestamp
+when the transaction is mined. Use --target-timestamp to specify the exact
+timestamp of the target block.
 
 ## Installation
 
@@ -85,6 +90,21 @@ After generating the signature, store it in the ERC-8004 Identity Registry::
   configured in ``UserValidatorPreRegistrated``.
 - The metadata transaction must be sent by whoever has permission to update
   the agent metadata in the ERC-8004 Identity Registry.
+
+## Agent Timing Calculations
+
+For agents that need to execute at specific times, use the timing helper::
+
+    python sign_evvm_authorization.py \\
+        --chain-id 1 \\
+        --whitelist 0xYourWhitelistEVVMContract \\
+        --agent-id 22 \\
+        --target-block 12345678
+
+The script will calculate:
+- Estimated block time based on chain
+- When to submit the transaction to hit the target block
+- Recommended gas price strategy
 """
 
 import argparse
@@ -98,6 +118,19 @@ from web3 import Web3
 
 DEFAULT_ETHEREUM_MAINNET_IDENTITY_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 METADATA_KEY = "evvmAuthSignature"
+
+# Average block times in seconds for common chains
+CHAIN_BLOCK_TIMES = {
+    1: 12,        # Ethereum
+    10: 2,        # Optimism
+    56: 3,        # BSC
+    137: 2,       # Polygon
+    8453: 2,      # Base
+    42161: 0.25,  # Arbitrum
+    43114: 2,     # Avalanche
+    100: 5,       # Gnosis
+    11155111: 12, # Sepolia
+}
 
 SET_METADATA_ABI = [
     {
@@ -138,9 +171,10 @@ def compute_authorization_digest(
     whitelist: str,
     registry: str,
     agent_id: int,
+    timestamp: int,
 ) -> bytes:
     """
-    Compute the authorization digest matching Solidity's authorizationDigest().
+    Compute the authorization digest matching Solidity's canExecute() digest.
 
     The digest is computed as::
 
@@ -150,7 +184,8 @@ def compute_authorization_digest(
                 chainId,
                 whitelist,
                 registry,
-                agentId
+                agentId,
+                timestamp
             )
         )
 
@@ -159,13 +194,14 @@ def compute_authorization_digest(
         whitelist: Address of the whitelist contract.
         registry: Address of the ERC-8004 Identity Registry.
         agent_id: The ERC-8004 agent identifier.
+        timestamp: Block timestamp when the transaction will be mined.
 
     Returns:
         32-byte digest as bytes.
     """
     return Web3.solidity_keccak(
-        ["string", "uint256", "address", "address", "uint256"],
-        ["EVVM_AGENT_AUTH", chain_id, whitelist, registry, agent_id],
+        ["string", "uint256", "address", "address", "uint256", "uint256"],
+        ["EVVM_AGENT_AUTH", chain_id, whitelist, registry, agent_id, timestamp],
     )
 
 
@@ -244,10 +280,12 @@ def print_authorization_output(
     whitelist: str,
     registry: str,
     agent_id: int,
+    timestamp: int,
     signature_hex: str,
     digest: bytes,
     digest_hex: str,
     calldata: Optional[str],
+    target_block: Optional[int] = None,
 ) -> None:
     """
     Print the authorization result in a human-readable format.
@@ -272,6 +310,7 @@ def print_authorization_output(
     print(f"Whitelist contract:      {whitelist}")
     print(f"Identity Registry:       {registry}")
     print(f"Agent ID:                {agent_id}")
+    print(f"Timestamp (block.timestamp): {timestamp}")
     print()
     print("Metadata key:")
     print(METADATA_KEY)
@@ -303,6 +342,52 @@ def print_authorization_output(
         "--rpc-url <ETHEREUM_MAINNET_RPC_URL>"
     )
 
+    if target_block:
+        print_timing_info(chain_id, target_block, timestamp)
+
+
+def print_timing_info(
+    chain_id: int,
+    target_block: Optional[int] = None,
+    target_timestamp: Optional[int] = None,
+) -> None:
+    """
+    Calculate and print timing information for the agent.
+
+    Args:
+        chain_id: Chain ID where the transaction will be sent.
+        target_block: Target block number for execution (optional).
+        target_timestamp: Target Unix timestamp (already used in signature).
+    """
+    import time
+    from datetime import datetime
+
+    block_time = CHAIN_BLOCK_TIMES.get(chain_id, 12)
+    current_time = int(time.time())
+
+    print()
+    print("=== Agent Timing Information ===")
+    print(f"Chain ID: {chain_id}")
+    print(f"Average block time: {block_time}s")
+    print(f"Current time: {current_time} ({datetime.fromtimestamp(current_time)})")
+    print(f"Signed timestamp: {target_timestamp} ({datetime.fromtimestamp(target_timestamp) if target_timestamp else 'N/A'})")
+
+    if target_timestamp:
+        seconds_until = target_timestamp - current_time
+        submit_time = current_time + max(0, seconds_until - int(block_time))
+        print()
+        print(f"Target timestamp: {target_timestamp} ({datetime.fromtimestamp(target_timestamp)})")
+        print(f"Seconds until target: {seconds_until}")
+        print(f"Recommended submit time: {submit_time} ({datetime.fromtimestamp(submit_time)})")
+        print(f"Submit {int(block_time)}s before target to hit the block")
+        print("IMPORTANT: block.timestamp MUST match the signed timestamp exactly!")
+
+    if target_block:
+        print()
+        print(f"Target block: {target_block}")
+        print("Note: Use an RPC to get current block number and calculate submission timing")
+        print(f"Formula: submit_time = now + (target_block - current_block) * {block_time}s")
+
 
 def parse_arguments() -> argparse.Namespace:
     """
@@ -315,6 +400,8 @@ def parse_arguments() -> argparse.Namespace:
             - agent_id: ERC-8004 agent identifier (required)
             - registry: Identity Registry address (default: mainnet)
             - private_key: Authorizer private key (from arg or env)
+            - target_block: Target block number for execution (optional)
+            - target_timestamp: Target timestamp for execution (optional)
     """
     parser = argparse.ArgumentParser(
         description="Sign EVVM authorization for an ERC-8004 agentId."
@@ -346,6 +433,17 @@ def parse_arguments() -> argparse.Namespace:
         default=os.environ.get("EVVM_AUTHORIZER_PRIVATE_KEY"),
         help="EVVM authorizer private key. Prefer EVVM_AUTHORIZER_PRIVATE_KEY env var.",
     )
+    parser.add_argument(
+        "--target-block",
+        type=int,
+        help="Target block number for execution. Script calculates when to submit.",
+    )
+    parser.add_argument(
+        "--target-timestamp",
+        type=int,
+        required=True,
+        help="Target Unix timestamp (must match block.timestamp when tx is mined).",
+    )
     return parser.parse_args()
 
 
@@ -373,7 +471,7 @@ def main() -> None:
     authorizer = Account.from_key(args.private_key)
 
     digest = compute_authorization_digest(
-        args.chain_id, whitelist, registry, args.agent_id
+        args.chain_id, whitelist, registry, args.agent_id, args.target_timestamp
     )
 
     digest_hex = bytes32_to_hex_string(digest)
@@ -389,10 +487,12 @@ def main() -> None:
         whitelist=whitelist,
         registry=registry,
         agent_id=args.agent_id,
+        timestamp=args.target_timestamp,
         signature_hex=signature_hex,
         digest=digest,
         digest_hex=digest_hex,
         calldata=calldata,
+        target_block=args.target_block,
     )
 
 

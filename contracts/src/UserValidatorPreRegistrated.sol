@@ -27,13 +27,16 @@ import {
 ///      5. The signature must recover to the configured evvmAuthorizer address
 ///
 ///      The signature proves: "This agentId is authorized for this exact whitelist contract,
-///      on this exact chain, using this exact ERC-8004 Identity Registry."
+///      on this exact chain, using this exact ERC-8004 Identity Registry, at this exact timestamp."
 ///
 ///      Signature digest construction (matches sign_evvm_authorization.py and sign-evvm-authorization.ts):
-///      keccak256(abi.encodePacked("EVVM_AGENT_AUTH", block.chainid, address(this), address(identityRegistry), agentId))
+///      keccak256(abi.encodePacked("EVVM_AGENT_AUTH", block.chainid, address(this), address(identityRegistry), agentId, block.timestamp))
 ///
 ///      The digest is converted to a 66-character hex string (with "0x" prefix) and signed using
 ///      Ethereum Signed Message format: keccak256("\x19Ethereum Signed Message:\n66" || hexString)
+///
+///      IMPORTANT: The block.timestamp is included in the digest, so the agent must sign with
+///      the exact timestamp of the block where the transaction will be mined.
 contract UserValidatorPreRegistrated {
     /// @notice The ERC-8004 Identity Registry used for agent verification and metadata retrieval
     IdentityRegistry immutable identityRegistry;
@@ -144,7 +147,6 @@ contract UserValidatorPreRegistrated {
         } catch {
             return false;
         }
-        if (signature.length != 65) return false;
 
         return
             SignatureRecover.recoverSigner(
@@ -155,7 +157,8 @@ contract UserValidatorPreRegistrated {
                             block.chainid,
                             address(this),
                             address(identityRegistry),
-                            reg.agentId
+                            reg.agentId,
+                            block.timestamp
                         )
                     )
                 ),

@@ -82,11 +82,15 @@ keccak256(abi.encodePacked(
     block.chainid,
     address(this),
     address(identityRegistry),
-    agentId
+    agentId,
+    block.timestamp
 ))
 ```
 
 Converted to a 66-character hex string and signed using Ethereum Signed Message format.
+
+**IMPORTANT:** The `block.timestamp` is included in the digest, so the agent must sign
+with the exact timestamp of the block where the transaction will be mined.
 
 ### 3. Standalone Reference Versions
 
@@ -140,6 +144,38 @@ npm run sign -- \
 | `--agent-id` | ERC-8004 agentId to authorize (required) | - |
 | `--registry` | ERC-8004 Identity Registry address | `0x8004...` |
 | `--private-key` | EVVM authorizer private key | env var |
+| `--target-timestamp` | Block timestamp (required, must match block.timestamp exactly) | - |
+| `--target-block` | Target block number for timing calculation | - |
+
+### Agent Timing
+
+The signature includes `block.timestamp` in the digest, so the agent must:
+1. Calculate the expected timestamp of the target block
+2. Sign with that exact timestamp
+3. Submit the transaction to arrive at that block
+
+```bash
+# Sign with target timestamp (required)
+python sign_evvm_authorization.py \
+  --chain-id 1 \
+  --whitelist 0xValidator \
+  --agent-id 22 \
+  --target-timestamp 1700000000
+
+# With target block for timing calculation
+python sign_evvm_authorization.py \
+  --chain-id 1 \
+  --whitelist 0xValidator \
+  --agent-id 22 \
+  --target-timestamp 1700000000 \
+  --target-block 12345678
+```
+
+The script will calculate:
+- When to submit the transaction to hit the target block
+- Recommended submission timing
+
+**IMPORTANT:** `block.timestamp` in the mined block MUST match the signed timestamp exactly.
 
 ## Onchain Storage
 
