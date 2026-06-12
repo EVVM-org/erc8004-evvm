@@ -95,6 +95,8 @@ keccak256(abi.encodePacked(
 - Signature authorizes specific agent for specific whitelist
 - Timestamp enables precise block-level execution timing
 
+**IMPORTANT:** This validator requires the use of the signing scripts (`scripts/python/` or `scripts/ts/`) to generate the authorization signatures with timestamps that must match exactly with `block.timestamp`.
+
 ## Signing Scripts
 
 Generate the EVVM authorizer signature to store in ERC-8004 metadata:
