@@ -43,9 +43,21 @@ erc8004-evvm/
 
 ## Contracts
 
-### 1. UserValidator.sol
+There are 3 validator types with increasing complexity and control:
 
-Basic EVVM validator using `balanceOf()`:
+### 1. UserValidatorManual (Simple)
+
+The simplest validator. Admin manually manages a whitelist of allowed addresses.
+
+```solidity
+canExecute(user) = allowedUsers[user]
+```
+
+**Use case:** When you need full control over who can execute. The admin must explicitly add each user via `setAllowedUser()`.
+
+### 2. UserValidator (Medium)
+
+Validates that the user owns at least one ERC-8004 agent. If they are a registered agent, they can interact.
 
 ```solidity
 canExecute(user) = identityRegistry.balanceOf(user) > 0
@@ -53,28 +65,17 @@ canExecute(user) = identityRegistry.balanceOf(user) > 0
 
 Uses the EVVM testnet contracts library (`ProposalStructs`, `IdentityRegistryUpgradeable`).
 
-This proves that with only an address, an EVVM validator can know whether the
-address owns one or more registered ERC-8004 agents.
+**Use case:** Open access for any registered ERC-8004 agent. No per-user admin approval needed.
 
-Limitation:
+**Limitation:** Cannot identify which specific agentIds the user owns.
 
-- It cannot list agentIds from only an address in the ERC-721 base interface.
+### 3. UserValidatorPreRegistrated (Advanced)
 
-### 2. UserValidatorPreRegistrated.sol
+Like `UserValidator`, but with atomic and advanced execution controls:
 
-Pre-registration + signature authorization:
-
-1. Agent calls `preRegisterAgent(agentId)`.
-2. Contract checks that caller is `ownerOf(agentId)` or `getAgentWallet(agentId)`.
-3. EVVM calls `canExecute(user)`.
-4. Contract verifies:
-   - User has an active pre-registration
-   - User is still the current owner or verified agentWallet
-   - Agent has metadata key `evvmAuthSignature` in the ERC-8004 registry
-   - Metadata is a valid 65-byte ECDSA signature
-   - Signature recovers to the configured `evvmAuthorizer`
-
-The signature digest (matching the signing scripts):
+1. Agent must pre-register an agentId (proves ownership/wallet)
+2. Agent must have a valid signature from `evvmAuthorizer` in the ERC-8004 metadata
+3. Signature includes `block.timestamp` for precise execution timing
 
 ```solidity
 keccak256(abi.encodePacked(
@@ -87,16 +88,12 @@ keccak256(abi.encodePacked(
 ))
 ```
 
-Converted to a 66-character hex string and signed using Ethereum Signed Message format.
+**Use case:** When you need to control exactly which agents can execute AND when they can execute. The signature with timestamp enables atomic execution coordination.
 
-**IMPORTANT:** The `block.timestamp` is included in the digest, so the agent must sign
-with the exact timestamp of the block where the transaction will be mined.
-
-### 3. Standalone Reference Versions
-
-`WhitelistEVVM_BasicERC8004.sol` and `WhitelistEVVM_PreRegisteredERC8004.sol` are
-self-contained reference implementations with no external dependencies beyond minimal
-inline interfaces. They serve as documentation and can be deployed independently.
+**Key features:**
+- Pre-registration proves agent ownership
+- Signature authorizes specific agent for specific whitelist
+- Timestamp enables precise block-level execution timing
 
 ## Signing Scripts
 
