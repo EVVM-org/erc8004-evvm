@@ -27,7 +27,10 @@ erc8004-evvm/
 │   │   ├── WhitelistEVVM_BasicERC8004.sol       # Standalone reference (no external deps)
 │   │   └── WhitelistEVVM_PreRegisteredERC8004.sol
 │   ├── script/
-│   │   └── DeployValidator.s.sol                # Deployment script (flag-based)
+│   │   ├── DeployUserValidatorManual.s.sol              # Deploy Type 1
+│   │   ├── DeployUserValidator.s.sol                    # Deploy Type 2
+│   │   └── DeployUserValidatorPreRegistrated.s.sol      # Deploy Type 3
+│   ├── Makefile                  # Deploy commands
 │   ├── lib/                      # Git submodules (ERC-8004, OpenZeppelin, etc.)
 │   └── foundry.toml
 └── scripts/
@@ -199,38 +202,50 @@ forge build
 
 ## Deploy
 
-Deploy validators using the `DeployValidator` script with environment variables:
+Each validator type has its own deployment script. Use the Makefile or forge directly.
 
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VALIDATOR_TYPE` | Yes | `1` (manual), `2` (balanceOf), or `3` (pre-registered) |
-| `ADMIN` | Yes | Admin address for the validator |
-| `EVVM_AUTHORIZER` | Type 3 only | Address that signs agent authorizations |
-| `IDENTITY_REGISTRY` | Optional | Override auto-detected registry address |
-
-### Type 1: UserValidatorManual (Manual Whitelist)
+### Using Makefile
 
 ```bash
 cd contracts
 
-VALIDATOR_TYPE=1 \
+# Set required env vars first
+export ADMIN=0xYourAdminAddress
+export EVVM_AUTHORIZER=0xAuthorizerAddress  # Type 3 only
+export RPC_URL_TESTNET=https://...
+export ETHERSCAN_API=your_key
+
+# Deploy Type 1: Manual whitelist
+make deployUserValidatorManual
+
+# Deploy Type 2: ERC-8004 balanceOf
+make deployUserValidator
+
+# Deploy Type 3: Pre-registration + Signature
+make deployUserValidatorPreRegistrated
+```
+
+### Using Forge Directly
+
+#### Type 1: UserValidatorManual
+
+```bash
+cd contracts
+
 ADMIN=0xYourAdminAddress \
-forge script script/DeployValidator.s.sol \
+forge script script/DeployUserValidatorManual.s.sol:DeployUserValidatorManual \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --broadcast
 ```
 
-### Type 2: UserValidator (ERC-8004 balanceOf)
+#### Type 2: UserValidator (ERC-8004 balanceOf)
 
 ```bash
 cd contracts
 
-VALIDATOR_TYPE=2 \
 ADMIN=0xYourAdminAddress \
-forge script script/DeployValidator.s.sol \
+forge script script/DeployUserValidator.s.sol:DeployUserValidator \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --broadcast
@@ -238,19 +253,26 @@ forge script script/DeployValidator.s.sol \
 
 The script auto-detects the Identity Registry address based on chain ID.
 
-### Type 3: UserValidatorPreRegistrated (Pre-registration + Signature)
+#### Type 3: UserValidatorPreRegistrated (Pre-registration + Signature)
 
 ```bash
 cd contracts
 
-VALIDATOR_TYPE=3 \
 ADMIN=0xYourAdminAddress \
 EVVM_AUTHORIZER=0xAuthorizerAddress \
-forge script script/DeployValidator.s.sol \
+forge script script/DeployUserValidatorPreRegistrated.s.sol:DeployUserValidatorPreRegistrated \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --broadcast
 ```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ADMIN` | All types | Admin address for the validator |
+| `EVVM_AUTHORIZER` | Type 3 only | Address that signs agent authorizations |
+| `IDENTITY_REGISTRY` | Optional | Override auto-detected registry address (Type 2 & 3) |
 
 ### Supported Chains
 
