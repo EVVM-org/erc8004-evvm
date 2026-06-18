@@ -23,7 +23,7 @@ erc8004-evvm/
 │   ├── src/
 │   │   ├── UserValidatorBasic.sol               # Type 1: Manual whitelist (UserValidatorManual)
 │   │   ├── UserValidator.sol                    # Type 2: ERC-8004 balanceOf check
-│   │   ├── UserValidatorPreRegistrated.sol      # Type 3: Pre-registration + signature
+│   │   ├── UserValidatorPreRegistrated.sol      # Type 3: Pre-registration + signature + expiration
 │   │   ├── WhitelistEVVM_BasicERC8004.sol       # Standalone reference (no external deps)
 │   │   └── WhitelistEVVM_PreRegisteredERC8004.sol
 │   ├── script/
@@ -31,6 +31,7 @@ erc8004-evvm/
 │   │   ├── DeployUserValidator.s.sol                    # Deploy Type 2
 │   │   └── DeployUserValidatorPreRegistrated.s.sol      # Deploy Type 3
 │   ├── Makefile                  # Deploy commands
+│   ├── .env.example              # Environment variables template
 │   ├── lib/                      # Git submodules (ERC-8004, OpenZeppelin, etc.)
 │   └── foundry.toml
 └── scripts/
@@ -76,9 +77,9 @@ Uses the EVVM testnet contracts library (`ProposalStructs`, `IdentityRegistryUpg
 
 Like `UserValidator`, but with atomic and advanced execution controls:
 
-1. Agent must pre-register an agentId (proves ownership/wallet)
+1. Agent must pre-register an agentId with an expiration timestamp
 2. Agent must have a valid signature from `evvmAuthorizer` in the ERC-8004 metadata
-3. Signature includes `block.timestamp` for precise execution timing
+3. Signature includes `expiresAt` for time-limited authorization
 
 ```solidity
 keccak256(abi.encodePacked(
@@ -87,18 +88,18 @@ keccak256(abi.encodePacked(
     address(this),
     address(identityRegistry),
     agentId,
-    block.timestamp
+    expiresAt
 ))
 ```
 
-**Use case:** When you need to control exactly which agents can execute AND when they can execute. The signature with timestamp enables atomic execution coordination.
+**Use case:** When you need to control exactly which agents can execute AND for how long they can execute. The signature with expiration time enables time-limited authorization.
 
 **Key features:**
 - Pre-registration proves agent ownership
 - Signature authorizes specific agent for specific whitelist
-- Timestamp enables precise block-level execution timing
+- Expiration time enables time-limited access control
 
-**IMPORTANT:** This validator requires the use of the signing scripts (`scripts/python/` or `scripts/ts/`) to generate the authorization signatures with timestamps that must match exactly with `block.timestamp`.
+**IMPORTANT:** This validator requires the use of the signing scripts (`scripts/python/` or `scripts/ts/`) to generate the authorization signatures with expiration timestamps that must match exactly with the `expiresAt` value used during `preRegisterAgent()`.
 
 ## Signing Scripts
 
@@ -120,7 +121,8 @@ export EVVM_AUTHORIZER_PRIVATE_KEY="0x..."
 python sign_evvm_authorization.py \
   --chain-id 1 \
   --whitelist 0xYourValidatorContract \
-  --agent-id 22
+  --agent-id 22 \
+  --expires-at 1700000000
 ```
 
 ### TypeScript
@@ -134,7 +136,8 @@ export EVVM_AUTHORIZER_PRIVATE_KEY="0x..."
 npm run sign -- \
   --chain-id 1 \
   --whitelist 0xYourValidatorContract \
-  --agent-id 22
+  --agent-id 22 \
+  --expires-at 1700000000
 ```
 
 ### Options
@@ -146,49 +149,62 @@ npm run sign -- \
 | `--agent-id` | ERC-8004 agentId to authorize (required) | - |
 | `--registry` | ERC-8004 Identity Registry address | `0x8004...` |
 | `--private-key` | EVVM authorizer private key | env var |
-| `--target-timestamp` | Block timestamp (required, must match block.timestamp exactly) | - |
-| `--target-block` | Target block number for timing calculation | - |
+| `--expires-at` | Expiration timestamp (required, must match preRegisterAgent) | - |
 
-### Agent Timing
+### Authorization Flow
 
-The signature includes `block.timestamp` in the digest, so the agent must:
-1. Calculate the expected timestamp of the target block
-2. Sign with that exact timestamp
-3. Submit the transaction to arrive at that block
+The Type 3 validator uses time-limited authorizations:
 
+1. **Generate signature** with expiration timestamp:
 ```bash
-# Sign with target timestamp (required)
 python sign_evvm_authorization.py \
   --chain-id 1 \
   --whitelist 0xValidator \
   --agent-id 22 \
-  --target-timestamp 1700000000
-
-# With target block for timing calculation
-python sign_evvm_authorization.py \
-  --chain-id 1 \
-  --whitelist 0xValidator \
-  --agent-id 22 \
-  --target-timestamp 1700000000 \
-  --target-block 12345678
+  --expires-at 1700000000
 ```
 
-The script will calculate:
-- When to submit the transaction to hit the target block
-- Recommended submission timing
+2. **Store signature** in ERC-8004 Identity Registry:
+```bash
+cast send 0x8004... \
+  "setMetadata(uint256,string,bytes)" \
+  22 \
+  "evvmAuthSignature" \
+  0xSignatureHex \
+  --private-key <AGENT_OWNER_PRIVATE_KEY>
+```
 
-**IMPORTANT:** `block.timestamp` in the mined block MUST match the signed timestamp exactly.
+3. **Pre-register agent** with the same expiration:
+```bash
+cast send 0xValidator \
+  "preRegisterAgent(uint256,uint256)" \
+  22 \
+  1700000000 \
+  --from <AGENT_OWNER_ADDRESS>
+```
+
+**IMPORTANT:** The `expiresAt` timestamp must match exactly between the signature and `preRegisterAgent()`.
 
 ## Onchain Storage
 
 After generating the signature, the agent owner stores it in the official registry:
 
 ```bash
+# Store signature in ERC-8004 Identity Registry
 cast send 0x8004A169FB4a3325136EB29fA0ceB6D2e539a432 \
   "setMetadata(uint256,string,bytes)" \
   22 \
   "evvmAuthSignature" \
   0xSignatureHex \
+  --private-key <AGENT_OWNER_PRIVATE_KEY> \
+  --rpc-url <ETHEREUM_MAINNET_RPC_URL>
+
+# Pre-register agent with expiration (Type 3 only)
+cast send 0xValidatorContract \
+  "preRegisterAgent(uint256,uint256)" \
+  22 \
+  1700000000 \
+  --from <AGENT_OWNER_ADDRESS> \
   --private-key <AGENT_OWNER_PRIVATE_KEY> \
   --rpc-url <ETHEREUM_MAINNET_RPC_URL>
 ```
@@ -266,6 +282,37 @@ forge script script/DeployUserValidatorPreRegistrated.s.sol:DeployUserValidatorP
   --broadcast
 ```
 
+**Post-deployment setup for Type 3:**
+
+1. Generate authorization signature:
+```bash
+cd scripts/python
+python sign_evvm_authorization.py \
+  --chain-id 1 \
+  --whitelist 0xDeployedValidator \
+  --agent-id 22 \
+  --expires-at 1700000000
+```
+
+2. Store signature in ERC-8004 Identity Registry:
+```bash
+cast send 0x8004... \
+  "setMetadata(uint256,string,bytes)" \
+  22 \
+  "evvmAuthSignature" \
+  0xSignatureHex \
+  --private-key <AGENT_OWNER_PRIVATE_KEY>
+```
+
+3. Pre-register agent with expiration:
+```bash
+cast send 0xDeployedValidator \
+  "preRegisterAgent(uint256,uint256)" \
+  22 \
+  1700000000 \
+  --from <AGENT_OWNER_ADDRESS>
+```
+
 ### Environment Variables
 
 | Variable | Required | Description |
@@ -273,6 +320,9 @@ forge script script/DeployUserValidatorPreRegistrated.s.sol:DeployUserValidatorP
 | `ADMIN` | All types | Admin address for the validator |
 | `EVVM_AUTHORIZER` | Type 3 only | Address that signs agent authorizations |
 | `IDENTITY_REGISTRY` | Optional | Override auto-detected registry address (Type 2 & 3) |
+
+**Type 3 post-deployment:**
+- `--expires-at`: Unix timestamp when authorization expires (must match in signature and preRegisterAgent)
 
 ### Supported Chains
 
@@ -294,7 +344,7 @@ The following areas are planned but not yet implemented:
 - **Signature verification tests**: Cross-validation between Solidity and signing scripts
 - **Pre-registration flow tests**: End-to-end testing of the full authorization flow
 - **Deployment tests**: Script testing on local/testnet environments
-- **Production hardening**: OpenZeppelin ECDSA, admin controls, revocation strategy, expiry/deadline
+- **Production hardening**: OpenZeppelin ECDSA, admin controls, revocation strategy
 - **Additional chain support**: Expand auto-detection for more networks
 
 ## Important
