@@ -17,7 +17,8 @@
  *
  * The signature attests:
  *
- *     "This ERC-8004 agentId is authorized for this exact EVVM whitelist."
+ *     "This ERC-8004 agentId is authorized for this exact EVVM whitelist,
+ *      until this expiration time."
  *
  * ## Digest Construction
  *
@@ -30,7 +31,7 @@
  *             address(whitelist),
  *             address(identityRegistry),
  *             agentId,
- *             block.timestamp
+ *             expiresAt
  *         )
  *     )
  *
@@ -39,9 +40,8 @@
  *
  *     keccak256("\x19Ethereum Signed Message:\n66" || hexString)
  *
- * IMPORTANT: The timestamp in the signature MUST match the block.timestamp
- * when the transaction is mined. Use --target-timestamp to specify the exact
- * timestamp of the target block.
+ * IMPORTANT: The expiresAt timestamp in the signature MUST match the expiresAt
+ * value used during preRegisterAgent().
  *
  * ## Installation
  *
@@ -54,7 +54,8 @@
  *     npm run sign -- \
  *         --chain-id 1 \
  *         --whitelist 0xYourWhitelistEVVMContract \
- *         --agent-id 22
+ *         --agent-id 22 \
+ *         --expires-at 1700000000
  *
  * ### Options
  *
@@ -64,6 +65,7 @@
  * | --whitelist     | Whitelist contract address (required)            | -            |
  * | --agent-id      | ERC-8004 agentId to authorize (required)         | -            |
  * | --registry      | ERC-8004 Identity Registry address               | 0x8004...    |
+ * | --expires-at    | Expiration timestamp (required)                  | -            |
  * | --private-key   | EVVM authorizer private key                      | env var      |
  *
  * ## Onchain Storage
@@ -84,6 +86,7 @@
  *   configured in `UserValidatorPreRegistrated`.
  * - The metadata transaction must be sent by whoever has permission to update
  *   the agent metadata in the ERC-8004 Identity Registry.
+ * - The expiresAt timestamp must match exactly between the signature and preRegisterAgent().
  *
  * @module sign-evvm-authorization
  */
@@ -106,19 +109,6 @@ const DEFAULT_ETHEREUM_MAINNET_IDENTITY_REGISTRY: Address =
 /** Metadata key used in the ERC-8004 Identity Registry */
 const METADATA_KEY = "evvmAuthSignature";
 
-/** Average block times in seconds for common chains */
-const CHAIN_BLOCK_TIMES: Record<number, number> = {
-  1: 12,        // Ethereum
-  10: 2,        // Optimism
-  56: 3,        // BSC
-  137: 2,       // Polygon
-  8453: 2,      // Base
-  42161: 0.25,  // Arbitrum
-  43114: 2,     // Avalanche
-  100: 5,       // Gnosis
-  11155111: 12, // Sepolia
-};
-
 /**
  * Parsed command-line arguments.
  */
@@ -131,12 +121,10 @@ interface Args {
   agentId: number;
   /** Address of the ERC-8004 Identity Registry */
   registry: Address;
+  /** Unix timestamp when the authorization expires */
+  expiresAt: number;
   /** Private key of the EVVM authorizer (with 0x prefix) */
   privateKey: string;
-  /** Target block number for execution (optional) */
-  targetBlock?: number;
-  /** Target Unix timestamp (required, must match block.timestamp) */
-  targetTimestamp: number;
 }
 
 /**
@@ -155,9 +143,8 @@ function parseCliArgs(): Args {
       whitelist: { type: "string" },
       "agent-id": { type: "string" },
       registry: { type: "string", default: DEFAULT_ETHEREUM_MAINNET_IDENTITY_REGISTRY },
+      "expires-at": { type: "string" },
       "private-key": { type: "string" },
-      "target-block": { type: "string" },
-      "target-timestamp": { type: "string" },
     },
   });
 
@@ -181,8 +168,8 @@ function parseCliArgs(): Args {
     process.exit(1);
   }
 
-  if (!values["target-timestamp"]) {
-    console.error("Missing --target-timestamp (must match block.timestamp when tx is mined).");
+  if (!values["expires-at"]) {
+    console.error("Missing --expires-at (must match preRegisterAgent expiresAt).");
     process.exit(1);
   }
 
@@ -191,11 +178,10 @@ function parseCliArgs(): Args {
     whitelist: values.whitelist as Address,
     agentId: parseInt(values["agent-id"]!, 10),
     registry: values.registry as Address,
+    expiresAt: parseInt(values["expires-at"], 10),
     privateKey: privateKey.startsWith("0x")
       ? privateKey
       : `0x${privateKey}`,
-    targetBlock: values["target-block"] ? parseInt(values["target-block"], 10) : undefined,
-    targetTimestamp: parseInt(values["target-timestamp"], 10),
   };
 }
 
@@ -211,7 +197,7 @@ function parseCliArgs(): Args {
  *             whitelist,
  *             registry,
  *             agentId,
- *             timestamp
+ *             expiresAt
  *         )
  *     )
  *
@@ -219,7 +205,7 @@ function parseCliArgs(): Args {
  * @param whitelist - Address of the whitelist contract
  * @param registry - Address of the ERC-8004 Identity Registry
  * @param agentId - The ERC-8004 agent identifier
- * @param timestamp - Block timestamp when the transaction will be mined
+ * @param expiresAt - Unix timestamp when the authorization expires
  * @returns 32-byte digest as hex string with 0x prefix
  */
 function computeAuthorizationDigest(
@@ -227,12 +213,12 @@ function computeAuthorizationDigest(
   whitelist: Address,
   registry: Address,
   agentId: number,
-  timestamp: number
+  expiresAt: number
 ): `0x${string}` {
   return keccak256(
     encodePacked(
       ["string", "uint256", "address", "address", "uint256", "uint256"],
-      ["EVVM_AGENT_AUTH", BigInt(chainId), whitelist, registry, BigInt(agentId), BigInt(timestamp)]
+      ["EVVM_AGENT_AUTH", BigInt(chainId), whitelist, registry, BigInt(agentId), BigInt(expiresAt)]
     )
   );
 }
@@ -246,11 +232,10 @@ function computeAuthorizationDigest(
  * @param params.whitelist - Address of the whitelist contract
  * @param params.registry - Address of the ERC-8004 Identity Registry
  * @param params.agentId - The ERC-8004 agent identifier
- * @param params.timestamp - Block timestamp used in the signature
+ * @param params.expiresAt - Unix timestamp when the authorization expires
  * @param params.signature - Hex-encoded signature
  * @param params.digest - Original 32-byte digest (hex string)
  * @param params.digestHex - Hex string representation of the digest (66 chars)
- * @param params.targetBlock - Target block number for execution (optional)
  */
 function printAuthorizationOutput(params: {
   authorizerAddress: Address;
@@ -258,11 +243,10 @@ function printAuthorizationOutput(params: {
   whitelist: Address;
   registry: Address;
   agentId: number;
-  timestamp: number;
+  expiresAt: number;
   signature: `0x${string}`;
   digest: `0x${string}`;
   digestHex: string;
-  targetBlock?: number;
 }): void {
   const {
     authorizerAddress,
@@ -270,12 +254,13 @@ function printAuthorizationOutput(params: {
     whitelist,
     registry,
     agentId,
-    timestamp,
+    expiresAt,
     signature,
     digest,
     digestHex,
-    targetBlock,
   } = params;
+
+  const expiresDate = new Date(expiresAt * 1000).toISOString();
 
   console.log("=== EVVM ERC-8004 Agent Authorization ===");
   console.log();
@@ -284,7 +269,7 @@ function printAuthorizationOutput(params: {
   console.log(`Whitelist contract:      ${whitelist}`);
   console.log(`Identity Registry:       ${registry}`);
   console.log(`Agent ID:                ${agentId}`);
-  console.log(`Timestamp (block.timestamp): ${timestamp}`);
+  console.log(`Expires at:              ${expiresAt} (${expiresDate})`);
   console.log();
   console.log("Metadata key:");
   console.log(METADATA_KEY);
@@ -308,60 +293,17 @@ function printAuthorizationOutput(params: {
       "--private-key <AGENT_OWNER_PRIVATE_KEY> " +
       "--rpc-url <ETHEREUM_MAINNET_RPC_URL>"
   );
-
-  if (targetBlock !== undefined) {
-    printTimingInfo(chainId, targetBlock, timestamp);
-  } else {
-    printTimingInfo(chainId, undefined, timestamp);
-  }
-}
-
-/**
- * Calculate and print timing information for the agent.
- *
- * @param chainId - Chain ID where the transaction will be sent
- * @param targetBlock - Target block number for execution (optional)
- * @param targetTimestamp - Target Unix timestamp (already used in signature)
- */
-function printTimingInfo(
-  chainId: number,
-  targetBlock?: number,
-  targetTimestamp?: number
-): void {
-  const blockTime = CHAIN_BLOCK_TIMES[chainId] || 12;
-  const currentTime = Math.floor(Date.now() / 1000);
-  const currentDate = new Date(currentTime * 1000).toISOString();
-
   console.log();
-  console.log("=== Agent Timing Information ===");
-  console.log(`Chain ID: ${chainId}`);
-  console.log(`Average block time: ${blockTime}s`);
-  console.log(`Current time: ${currentTime} (${currentDate})`);
-  if (targetTimestamp) {
-    const signedDate = new Date(targetTimestamp * 1000).toISOString();
-    console.log(`Signed timestamp: ${targetTimestamp} (${signedDate})`);
-  }
-
-  if (targetTimestamp !== undefined) {
-    const secondsUntil = targetTimestamp - currentTime;
-    const submitTime = currentTime + Math.max(0, secondsUntil - Math.floor(blockTime));
-    const targetDate = new Date(targetTimestamp * 1000).toISOString();
-    const submitDate = new Date(submitTime * 1000).toISOString();
-
-    console.log();
-    console.log(`Target timestamp: ${targetTimestamp} (${targetDate})`);
-    console.log(`Seconds until target: ${secondsUntil}`);
-    console.log(`Recommended submit time: ${submitTime} (${submitDate})`);
-    console.log(`Submit ${Math.floor(blockTime)}s before target to hit the block`);
-    console.log("IMPORTANT: block.timestamp MUST match the signed timestamp exactly!");
-  }
-
-  if (targetBlock !== undefined) {
-    console.log();
-    console.log(`Target block: ${targetBlock}`);
-    console.log("Note: Use an RPC to get current block number and calculate submission timing");
-    console.log(`Formula: submit_time = now + (target_block - current_block) * ${blockTime}s`);
-  }
+  console.log("Pre-registration example:");
+  console.log(
+    `cast send ${whitelist} ` +
+      '"preRegisterAgent(uint256,uint256)" ' +
+      `${agentId} ` +
+      `${expiresAt} ` +
+      "--from <AGENT_OWNER_ADDRESS> " +
+      "--private-key <AGENT_OWNER_PRIVATE_KEY> " +
+      "--rpc-url <RPC_URL>"
+  );
 }
 
 /**
@@ -369,7 +311,7 @@ function printTimingInfo(
  *
  * Orchestrates the complete flow:
  * 1. Parse and validate CLI arguments
- * 2. Compute the authorization digest
+ * 2. Compute the authorization digest (with expiresAt)
  * 3. Sign the hex string representation using EIP-191
  * 4. Output results and usage examples
  *
@@ -393,7 +335,7 @@ async function main(): Promise<void> {
     args.whitelist,
     args.registry,
     args.agentId,
-    args.targetTimestamp
+    args.expiresAt
   );
 
   // The digest is already a hex string (0x + 64 hex chars = 66 chars)
@@ -411,11 +353,10 @@ async function main(): Promise<void> {
     whitelist: args.whitelist,
     registry: args.registry,
     agentId: args.agentId,
-    timestamp: args.targetTimestamp,
+    expiresAt: args.expiresAt,
     signature,
     digest,
     digestHex: digestHexString,
-    targetBlock: args.targetBlock,
   });
 }
 
