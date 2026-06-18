@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+
+# Dotenv file
+.env
+.env.*
+!.env.example
