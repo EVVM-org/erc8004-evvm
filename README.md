@@ -21,11 +21,9 @@ They use the official Ethereum Mainnet ERC-8004 Identity Registry by default:
 erc8004-evvm/
 ├── contracts/                    # Foundry project
 │   ├── src/
-│   │   ├── UserValidatorBasic.sol               # Type 1: Manual whitelist (UserValidatorManual)
+│   │   ├── UserValidatorManual.sol              # Type 1: Manual whitelist
 │   │   ├── UserValidator.sol                    # Type 2: ERC-8004 balanceOf check
-│   │   ├── UserValidatorPreRegistrated.sol      # Type 3: Pre-registration + signature + expiration
-│   │   ├── WhitelistEVVM_BasicERC8004.sol       # Standalone reference (no external deps)
-│   │   └── WhitelistEVVM_PreRegisteredERC8004.sol
+│   │   └── UserValidatorPreRegistrated.sol      # Type 3: Pre-registration + signature + expiration
 │   ├── script/
 │   │   ├── DeployUserValidatorManual.s.sol              # Deploy Type 1
 │   │   ├── DeployUserValidator.s.sol                    # Deploy Type 2
@@ -38,10 +36,12 @@ erc8004-evvm/
     ├── python/
     │   ├── sign_evvm_authorization.py
     │   ├── requirements.txt
+    │   ├── .env.example
     │   └── README.md
     └── ts/
         ├── sign-evvm-authorization.ts
         ├── package.json
+        ├── .env.example
         └── README.md
 ```
 
