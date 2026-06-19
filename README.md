@@ -9,6 +9,23 @@
 
 EVVM user validators using the official ERC-8004 Identity Registry.
 
+## What is ERC-8004?
+
+[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) is a standard for **trustless agents** that enables discovering, choosing, and interacting with agents across organizational boundaries. It defines three registries:
+
+1. **Identity Registry** - ERC-721 NFTs that represent agents (what this project uses)
+2. **Reputation Registry** - Feedback and scoring system
+3. **Validation Registry** - Work verification hooks
+
+Each agent is an NFT with a unique `agentId`. The Identity Registry provides:
+- `ownerOf(agentId)` - Agent owner
+- `getAgentWallet(agentId)` - Verified wallet address
+- `getMetadata(agentId, key)` / `setMetadata(agentId, key, value)` - On-chain metadata
+
+This project uses the metadata system to store authorization signatures under the key `"evvmAuthSignature"`.
+
+## Project Overview
+
 These examples do **not** deploy a custom ERC-8004 registry.
 
 They use the official Ethereum Mainnet ERC-8004 Identity Registry by default:
@@ -109,6 +126,8 @@ Generate the EVVM authorizer signature to store in ERC-8004 metadata:
 metadataKey   = evvmAuthSignature
 metadataValue = 65-byte ECDSA signature
 ```
+
+**For AI Agents:** See [AGENTS.md](./AGENTS.md) for detailed integration documentation, API reference, and code examples.
 
 ### Python
 
